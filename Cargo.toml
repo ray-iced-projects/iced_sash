@@ -1,0 +1,12 @@
+[package]
+name = "iced_sash"
+version = "0.1.0"
+edition = "2024"
+authors = ["Charles Ray <ray.iced.projects@gmail.com>"]
+description = "An Iced widget for allowing adjacent containers to be resized"
+
+[lib]
+name = "iced_sash"
+
+[dependencies]
+iced = { git = "https://github.com/iced-rs/iced", branch = "master", features = ["advanced", "debug"] }
