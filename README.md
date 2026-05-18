@@ -71,7 +71,7 @@ Three built-in style functions are provided:
 | Function | Appearance |
 |---|---|
 | `iced_sash::subtle` | Background shades from the theme palette (default) |
-| `iced_sash::primary` | Primary colour from the theme palette |
+| `iced_sash::primary` | Primary color from the theme palette |
 | `iced_sash::transparent` | Transparent when idle, background shades on hover/drag |
 
 Pass a custom function via `.style(...)` to fully control the handle appearance.
