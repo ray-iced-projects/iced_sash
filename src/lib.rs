@@ -18,6 +18,80 @@ use iced::Point;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 
+pub struct SashH;
+
+impl SashH {
+    /// Creates a horizontal sash widget.
+    ///
+    /// - `children` — panel contents; one per entry in `initial_sizes`.
+    /// - `initial_sizes` — starting widths used on the first render only.
+    /// - `height` — shared panel height in pixels.
+    /// - `sash_size` — thickness of each vertical drag handle in pixels.
+    pub fn new<'a, Message, Theme>(
+        children: Vec<Element<'a, Message, Theme>>,
+        initial_sizes: Vec<f32>,
+        height: f32,
+        sash_size: f32,
+    ) -> SashWidget<'a, Message, Theme>
+    where
+        Message: Clone + 'a,
+        Theme: Catalog + 'a,
+    {
+        SashWidget {
+            children,
+            initial_sizes,
+            cross_size: height,
+            sash_size,
+            axis: Axis::Horizontal,
+            id: Id::unique(),
+            max_size: None,
+            min_size: 0.0,
+            on_resize: None,
+            on_release: None,
+            sync_sizes: None,
+            class: Theme::default(),
+        }
+    }
+}
+
+
+pub struct SashV;
+
+impl SashV {
+    /// Creates a vertical sash widget.
+    ///
+    /// - `children` — panel contents; one per entry in `initial_sizes`.
+    /// - `initial_sizes` — starting heights used on the first render only.
+    /// - `width` — shared panel width in pixels.
+    /// - `sash_size` — thickness of each horizontal drag handle in pixels.
+    pub fn new<'a, Message, Theme>(
+        children: Vec<Element<'a, Message, Theme>>,
+        initial_sizes: Vec<f32>,
+        width: f32,
+        sash_size: f32,
+    ) -> SashWidget<'a, Message, Theme>
+    where
+        Message: Clone + 'a,
+        Theme: Catalog + 'a,
+    {
+        SashWidget {
+            children,
+            initial_sizes,
+            cross_size: width,
+            sash_size,
+            axis: Axis::Vertical,
+            id: Id::unique(),
+            max_size: None,
+            min_size: 0.0,
+            on_resize: None,
+            on_release: None,
+            sync_sizes: None,
+            class: Theme::default(),
+        }
+    }
+}
+
+
 pub struct Sash<'a, Message, Theme = iced::Theme>
 where
     Theme: Catalog,
@@ -116,8 +190,6 @@ impl<'a, Message, Theme> Sash<'a, Message, Theme>
 where
     Theme: Catalog,
 {
-    /// The default height of a [`Sash`].
-    pub const DEFAULT_HEIGHT: f32 = 21.0;
 
     /// Creates a new [`Sash`].
     pub fn new<F>(
@@ -729,11 +801,8 @@ impl Id {
     }
 }
 
-// ============================================================================
-// resize() — size-conservation helper (available for manual use)
-// ============================================================================
 
-/// Applies size-conservation resize math to a panel sizes vector.
+/// Applies resize math to a panel sizes vector.
 ///
 /// The panel at `index` is set to `value`; the adjacent panel absorbs the
 /// difference. `min_size` clamps both panels — pass `0.0` for no minimum.
@@ -755,10 +824,8 @@ pub fn resize(sizes: &mut Vec<f32>, index: usize, value: f32, min_size: f32) {
     }
 }
 
-// ============================================================================
-// Shared helpers
-// ============================================================================
 
+// Applies max size
 fn apply_max_size(sizes: &[f32], max_size: Option<f32>) -> Vec<f32> {
     let total: f32 = sizes.iter().sum();
     match max_size {
@@ -777,10 +844,8 @@ fn max_size_scale(sizes: &[f32], max_size: Option<f32>) -> f32 {
     }
 }
 
-// ============================================================================
-// Axis
-// ============================================================================
 
+// Axis
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Axis {
     Horizontal,
@@ -839,10 +904,8 @@ impl Axis {
     }
 }
 
-// ============================================================================
-// Shared state
-// ============================================================================
 
+// State
 struct SashState {
     id: Id,
     sizes: Vec<f32>,
@@ -850,10 +913,6 @@ struct SashState {
     drag_index: usize,
     hovered: Option<usize>,
 }
-
-// ============================================================================
-// SashWidget — single implementation for both orientations
-// ============================================================================
 
 /// A resizable panel widget. Construct with [`SashH`] or [`SashV`].
 pub struct SashWidget<'a, Message, Theme = iced::Theme>
@@ -1154,81 +1213,4 @@ where
 pub type SashHWidget<'a, Message, Theme = iced::Theme> = SashWidget<'a, Message, Theme>;
 pub type SashVWidget<'a, Message, Theme = iced::Theme> = SashWidget<'a, Message, Theme>;
 
-// ============================================================================
-// SashH / SashV — constructor namespaces
-// ============================================================================
-
-/// Namespace for constructing horizontal sash widgets.
-pub struct SashH;
-
-impl SashH {
-    /// Creates a horizontal sash widget.
-    ///
-    /// - `children` — panel contents; one per entry in `initial_sizes`.
-    /// - `initial_sizes` — starting widths used on the first render only.
-    /// - `height` — shared panel height in pixels.
-    /// - `sash_size` — thickness of each vertical drag handle in pixels.
-    pub fn new<'a, Message, Theme>(
-        children: Vec<Element<'a, Message, Theme>>,
-        initial_sizes: Vec<f32>,
-        height: f32,
-        sash_size: f32,
-    ) -> SashWidget<'a, Message, Theme>
-    where
-        Message: Clone + 'a,
-        Theme: Catalog + 'a,
-    {
-        SashWidget {
-            children,
-            initial_sizes,
-            cross_size: height,
-            sash_size,
-            axis: Axis::Horizontal,
-            id: Id::unique(),
-            max_size: None,
-            min_size: 0.0,
-            on_resize: None,
-            on_release: None,
-            sync_sizes: None,
-            class: Theme::default(),
-        }
-    }
-}
-
-/// Namespace for constructing vertical sash widgets.
-pub struct SashV;
-
-impl SashV {
-    /// Creates a vertical sash widget.
-    ///
-    /// - `children` — panel contents; one per entry in `initial_sizes`.
-    /// - `initial_sizes` — starting heights used on the first render only.
-    /// - `width` — shared panel width in pixels.
-    /// - `sash_size` — thickness of each horizontal drag handle in pixels.
-    pub fn new<'a, Message, Theme>(
-        children: Vec<Element<'a, Message, Theme>>,
-        initial_sizes: Vec<f32>,
-        width: f32,
-        sash_size: f32,
-    ) -> SashWidget<'a, Message, Theme>
-    where
-        Message: Clone + 'a,
-        Theme: Catalog + 'a,
-    {
-        SashWidget {
-            children,
-            initial_sizes,
-            cross_size: width,
-            sash_size,
-            axis: Axis::Vertical,
-            id: Id::unique(),
-            max_size: None,
-            min_size: 0.0,
-            on_resize: None,
-            on_release: None,
-            sync_sizes: None,
-            class: Theme::default(),
-        }
-    }
-}
 
