@@ -49,6 +49,9 @@ impl SashH {
             on_release: None,
             sync_sizes: None,
             class: Theme::default(),
+            outer_handle_size: None,
+            outer_resize_mode: OuterResizeMode::LastOnly,
+            on_outer_resize: None,
         }
     }
 }
@@ -86,6 +89,9 @@ impl SashV {
             on_release: None,
             sync_sizes: None,
             class: Theme::default(),
+            outer_handle_size: None,
+            outer_resize_mode: OuterResizeMode::LastOnly,
+            on_outer_resize: None,
         }
     }
 }
@@ -363,6 +369,37 @@ pub fn resize(sizes: &mut Vec<f32>, index: usize, value: f32, min_size: f32) {
 }
 
 
+/// Applies an outer resize to `sizes` according to `mode`.
+/// `new_total` is the desired sum of all panel sizes after the drag.
+/// Call this in your `update()` to mirror outer-handle drags on a stored
+/// sizes vector, then pass that vector to `sync_sashes()` on the next frame.
+pub fn apply_outer_resize(sizes: &mut Vec<f32>, new_total: f32, mode: OuterResizeMode, min_size: f32) {
+    if sizes.is_empty() { return; }
+    let new_total = new_total.max(sizes.len() as f32 * min_size);
+    let old_total: f32 = sizes.iter().sum();
+    let delta = new_total - old_total;
+    if delta == 0.0 { return; }
+    match mode {
+        OuterResizeMode::LastOnly => {
+            let last = sizes.len() - 1;
+            sizes[last] = (sizes[last] + delta).max(min_size);
+        }
+        OuterResizeMode::Uniform => {
+            let per = delta / sizes.len() as f32;
+            for s in sizes.iter_mut() {
+                *s = (*s + per).max(min_size);
+            }
+        }
+        OuterResizeMode::Proportional => {
+            if old_total <= 0.0 { return; }
+            let scale = new_total / old_total;
+            for s in sizes.iter_mut() {
+                *s = (*s * scale).max(min_size);
+            }
+        }
+    }
+}
+
 // Applies max size
 fn apply_max_size(sizes: &[f32], max_size: Option<f32>) -> Vec<f32> {
     let total: f32 = sizes.iter().sum();
@@ -396,6 +433,9 @@ impl Axis {
     }
     fn bounds_end(self, b: Rectangle) -> f32 {
         match self { Axis::Horizontal => b.x + b.width, Axis::Vertical => b.y + b.height }
+    }
+    fn bounds_start(self, b: Rectangle) -> f32 {
+        match self { Axis::Horizontal => b.x, Axis::Vertical => b.y }
     }
     fn main_start(self, r: Rectangle) -> f32 {
         match self { Axis::Horizontal => r.x, Axis::Vertical => r.y }
@@ -440,8 +480,36 @@ impl Axis {
             Axis::Vertical   => mouse::Interaction::ResizingVertically,
         }
     }
+    fn outer_handle_rect(self, bounds: Rectangle, panel_total: f32, handle_size: f32, cross_size: f32) -> Rectangle {
+        match self {
+            Axis::Horizontal => Rectangle {
+                x: bounds.x + panel_total,
+                y: bounds.y,
+                width: handle_size,
+                height: cross_size,
+            },
+            Axis::Vertical => Rectangle {
+                x: bounds.x,
+                y: bounds.y + panel_total,
+                width: cross_size,
+                height: handle_size,
+            },
+        }
+    }
 }
 
+
+/// Controls how panels are resized when the outer trailing handle is dragged.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum OuterResizeMode {
+    /// Only the last panel absorbs the change.
+    #[default]
+    LastOnly,
+    /// Every panel grows or shrinks by the same amount.
+    Uniform,
+    /// Every panel scales proportionally to its current size.
+    Proportional,
+}
 
 // State
 struct SashState {
@@ -450,6 +518,8 @@ struct SashState {
     is_dragging: bool,
     drag_index: usize,
     hovered: Option<usize>,
+    is_outer_dragging: bool,
+    outer_hovered: bool,
 }
 
 /// A resizable panel widget. Construct with [`SashH`] or [`SashV`].
@@ -469,6 +539,9 @@ where
     on_release: Option<Box<dyn Fn(Id, usize) -> Message + 'a>>,
     sync_sizes: Option<Vec<f32>>,
     class: Theme::Class<'a>,
+    outer_handle_size: Option<f32>,
+    outer_resize_mode: OuterResizeMode,
+    on_outer_resize: Option<Box<dyn Fn(Id, f32) -> Message + 'a>>,
 }
 
 impl<'a, Message, Theme> SashWidget<'a, Message, Theme>
@@ -508,6 +581,22 @@ where
     pub fn sync_sashes(mut self, sizes: Vec<f32>) -> Self {
         self.sync_sizes = Some(sizes); self
     }
+
+    /// Enables an outer resize handle at the trailing edge (right for `SashH`, bottom for `SashV`).
+    /// `size` sets the handle thickness in pixels.
+    pub fn outer_handle(mut self, size: f32) -> Self {
+        self.outer_handle_size = Some(size); self
+    }
+
+    /// Sets how panels are resized when the outer handle is dragged. Default: [`OuterResizeMode::LastOnly`].
+    pub fn outer_resize_mode(mut self, mode: OuterResizeMode) -> Self {
+        self.outer_resize_mode = mode; self
+    }
+
+    /// Callback fired on every outer-handle drag tick: `(id, new_total_main_size)`.
+    pub fn on_outer_resize(mut self, f: impl Fn(Id, f32) -> Message + 'a) -> Self {
+        self.on_outer_resize = Some(Box::new(f)); self
+    }
 }
 
 impl<Message, Theme> Widget<Message, Theme, iced::Renderer>
@@ -525,6 +614,8 @@ where
             is_dragging: false,
             drag_index: 0,
             hovered: None,
+            is_outer_dragging: false,
+            outer_hovered: false,
         })
     }
 
@@ -569,7 +660,8 @@ where
             child_nodes.push(node);
             main += panel_size;
         }
-        layout::Node::with_children(ax.total_size(main, self.cross_size), child_nodes)
+        let total_main = main + self.outer_handle_size.unwrap_or(0.0);
+        layout::Node::with_children(ax.total_size(total_main, self.cross_size), child_nodes)
     }
 
     fn draw(
@@ -607,6 +699,23 @@ where
             renderer.fill_quad(
                 renderer::Quad {
                     bounds: *hb,
+                    border: Border { radius: sty.border_radius, width: sty.border_width, color: sty.border_color },
+                    ..renderer::Quad::default()
+                },
+                sty.background,
+            );
+        }
+
+        if let Some(ohs) = self.outer_handle_size {
+            let panel_total: f32 = display.iter().sum();
+            let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, self.cross_size);
+            let outer_status = if st.is_outer_dragging { Status::Dragged }
+                else if st.outer_hovered { Status::Hovered }
+                else { Status::Active };
+            let sty = theme.style(&self.class, outer_status);
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: outer_rect,
                     border: Border { radius: sty.border_radius, width: sty.border_width, color: sty.border_color },
                     ..renderer::Quad::default()
                 },
@@ -654,6 +763,13 @@ where
                     st.is_dragging = true;
                     st.drag_index = idx;
                     shell.capture_event();
+                } else if let Some(ohs) = self.outer_handle_size {
+                    let panel_total: f32 = display.iter().sum();
+                    let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, self.cross_size);
+                    if cursor.is_over(outer_rect) {
+                        st.is_outer_dragging = true;
+                        shell.capture_event();
+                    }
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -664,6 +780,11 @@ where
                     if let Some(f) = &self.on_release { shell.publish(f(id, st.drag_index)); }
                     st.is_dragging = false;
                     st.drag_index = 0;
+                    shell.invalidate_layout();
+                    shell.request_redraw();
+                    shell.capture_event();
+                } else if st.is_outer_dragging {
+                    st.is_outer_dragging = false;
                     shell.invalidate_layout();
                     shell.request_redraw();
                     shell.capture_event();
@@ -697,11 +818,32 @@ where
                     shell.capture_event();
                     shell.invalidate_layout();
                     shell.request_redraw();
+                } else if st.is_outer_dragging {
+                    let id = st.id;
+                    let pos = ax.cursor_coord(*position);
+                    let new_total = (pos - ax.bounds_start(bounds)).round().max(0.0);
+                    apply_outer_resize(&mut st.sizes, new_total, self.outer_resize_mode, self.min_size);
+                    if let Some(f) = &self.on_outer_resize {
+                        let total: f32 = st.sizes.iter().sum();
+                        shell.publish(f(id, total));
+                    }
+                    shell.capture_event();
+                    shell.invalidate_layout();
+                    shell.request_redraw();
                 } else {
                     let new_hover = find_mouse_over_handle_bounds(&hbs, cursor);
                     if new_hover != st.hovered {
                         st.hovered = new_hover;
                         shell.request_redraw();
+                    }
+                    if let Some(ohs) = self.outer_handle_size {
+                        let panel_total: f32 = display.iter().sum();
+                        let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, self.cross_size);
+                        let new_outer_hovered = cursor.is_over(outer_rect);
+                        if new_outer_hovered != st.outer_hovered {
+                            st.outer_hovered = new_outer_hovered;
+                            shell.request_redraw();
+                        }
                     }
                 }
             }
@@ -719,7 +861,7 @@ where
     ) -> mouse::Interaction {
         let ax = self.axis;
         let st = tree.state.downcast_ref::<SashState>();
-        if st.is_dragging { return ax.resize_interaction(); }
+        if st.is_dragging || st.is_outer_dragging { return ax.resize_interaction(); }
         let display = apply_max_size(&st.sizes, self.max_size);
         let bounds = layout.bounds();
         let mut offsets = vec![-self.sash_size / 2.0; display.len().saturating_sub(1)];
@@ -728,6 +870,13 @@ where
         let hbs = get_handle_bounds(bounds, &display, hw, hh, &offsets, false, ax.direction());
         if find_mouse_over_handle_bounds(&hbs, cursor).is_some() {
             return ax.resize_interaction();
+        }
+        if let Some(ohs) = self.outer_handle_size {
+            let panel_total: f32 = display.iter().sum();
+            let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, self.cross_size);
+            if cursor.is_over(outer_rect) {
+                return ax.resize_interaction();
+            }
         }
         self.children.iter().zip(layout.children()).zip(tree.children.iter())
             .map(|((c, l), t)| c.as_widget().mouse_interaction(t, l, cursor, viewport, renderer))
