@@ -43,6 +43,45 @@ SashH::new(
 | `.on_release(fn(Id, usize) -> Message)` | Called on mouse release with `(id, handle_index)`. |
 | `.sync_sashes(Vec<f32>)` | Pushes external sizes into tree state each layout pass — use this to keep two sashes in sync. |
 | `.style(fn(&Theme, Status) -> Style)` | Custom handle style. |
+| `.outer_handle(f32)` | Adds a trailing-edge resize handle (right for `SashH`, bottom for `SashV`) of the given thickness. |
+| `.outer_resize_mode(OuterResizeMode)` | Controls how panels are resized when the outer handle is dragged. Default: `LastOnly`. |
+| `.on_outer_resize(fn(Id, f32) -> Message)` | Called on every outer-handle drag tick with `(id, new_total_main_size)`. |
+
+## Outer handle
+
+The outer handle lets users resize the entire widget from its trailing edge. Three distribution modes are available:
+
+| `OuterResizeMode` | Behaviour |
+|---|---|
+| `LastOnly` | Only the last panel absorbs the change (default) |
+| `Uniform` | Every panel grows or shrinks by the same amount |
+| `Proportional` | Every panel scales proportionally to its current size |
+
+```rust
+SashH::new(children, sizes, 200.0, 4.0)
+    .outer_handle(6.0)
+    .outer_resize_mode(iced_sash::OuterResizeMode::Proportional)
+    .on_outer_resize(Message::OuterResized)
+```
+
+To keep a linked sash in sync with outer-handle drags, call `iced_sash::apply_outer_resize` in your `update()` — the same pattern used for inner handles:
+
+```rust
+// In update():
+Message::OuterResized(_id, new_total) => {
+    iced_sash::apply_outer_resize(
+        &mut self.sizes, new_total,
+        OuterResizeMode::Proportional, 50.0,
+    );
+}
+
+// In view():
+SashH::new(children, self.sizes.clone(), 200.0, 4.0)
+    .outer_handle(6.0)
+    .outer_resize_mode(OuterResizeMode::Proportional)
+    .on_outer_resize(Message::OuterResized)
+    .sync_sashes(self.sizes.clone())
+```
 
 ## Linking two sashes
 
@@ -76,10 +115,11 @@ Three built-in style functions are provided:
 
 Pass a custom function via `.style(...)` to fully control the handle appearance.
 
-## Running the example
+## Running the examples
 
 ```sh
-cargo run --example sashing
+cargo run --example sashing             # linked SashH + SashV with sync demo
+cargo run --example sashing_w_outer     # outer handle with proportional resize mode
 ```
 
 ## Dependency
