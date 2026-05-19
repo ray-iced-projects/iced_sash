@@ -18,56 +18,6 @@ use iced::Point;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 
-pub fn sash_horizontal<'a, Message, Theme>(
-    id: usize,
-    widths: Vec<f32>,
-    handle_width: f32,
-    handle_height: f32,
-    on_change: impl Fn((usize, usize, f32)) -> Message + 'a,
-) -> Sash<'a, Message, Theme>
-where
-    Message: Clone,
-    Theme: Catalog + 'a,
-{
-    let mut handle_offsets = vec![-handle_width/2.0; widths.len()-1];
-        handle_offsets.extend([-handle_width]);
-    
-    Sash::new(
-        id,
-        widths, 
-        handle_width, 
-        handle_height,
-        handle_offsets,
-        Direction::Horizontal,
-        on_change)
-}
-
-pub fn sash_vertical<'a, Message, Theme>(
-    id: usize,
-    heights: Vec<f32>,
-    handle_width: f32,
-    handle_height: f32,
-    on_change: impl Fn((usize, usize, f32)) -> Message + 'a,
-) -> Sash<'a, Message, Theme>
-where
-    Message: Clone,
-    Theme: Catalog + 'a,
-{
-    let widths = heights;
-    let mut handle_offsets = vec![-handle_height/2.0; widths.len()-1];
-        // last offset pulled in to keep in bounds
-        handle_offsets.extend([-handle_height]);
-        
-    Sash::new(
-        id,
-        widths, 
-        handle_width, 
-        handle_height,
-        handle_offsets,
-        Direction::Vertical,
-        on_change)
-}
-
 pub struct Sash<'a, Message, Theme = iced::Theme>
 where
     Theme: Catalog,
