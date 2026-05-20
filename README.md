@@ -46,6 +46,10 @@ SashH::new(
 | `.outer_handle(f32)` | Adds a trailing-edge resize handle (right for `SashH`, bottom for `SashV`) of the given thickness. |
 | `.outer_resize_mode(OuterResizeMode)` | Controls how panels are resized when the outer handle is dragged. Default: `LastOnly`. |
 | `.on_outer_resize(fn(Id, f32) -> Message)` | Called on every outer-handle drag tick with `(id, new_total_main_size)`. |
+| `.cross_handle(f32)` | Adds a cross-axis resize handle (bottom for `SashH`, right for `SashV`) of the given thickness. |
+| `.min_cross_size(f32)` | Minimum cross size enforced while dragging the cross handle. Default: `0.0`. |
+| `.on_cross_resize(fn(Id, f32) -> Message)` | Called on every cross-handle drag tick with `(id, new_cross_size)`. |
+| `.sync_cross_sashes(f32)` | Pushes an external cross size into tree state each layout pass — use this to keep multiple sashes the same height/width. |
 
 ## Outer handle
 
@@ -83,6 +87,39 @@ SashH::new(children, self.sizes.clone(), 200.0, 4.0)
     .sync_sashes(self.sizes.clone())
 ```
 
+## Cross handle
+
+The cross handle lets users resize the widget along its cross axis (height for `SashH`, width for `SashV`) by dragging a strip at the trailing edge.
+
+```rust
+SashH::new(children, sizes, 200.0, 4.0)
+    .cross_handle(4.0)
+    .min_cross_size(80.0)
+    .on_cross_resize(Message::ResizedCross)
+```
+
+To keep multiple sashes at the same cross size, store the value in app state and feed it back via `.sync_cross_sashes()`:
+
+```rust
+// In update():
+Message::ResizedCross(_id, size) => {
+    if self.sync_cross {
+        self.height = size;
+    }
+}
+
+// In view():
+SashH::new(children_a, self.sizes.clone(), self.height, 4.0)
+    .cross_handle(4.0)
+    .on_cross_resize(Message::ResizedCross)
+    .sync_cross_sashes(self.height)
+
+SashH::new(children_b, self.sizes.clone(), self.height, 4.0)
+    .cross_handle(4.0)
+    .on_cross_resize(Message::ResizedCross)
+    .sync_cross_sashes(self.height)
+```
+
 ## Linking two sashes
 
 Store the sizes in your app state and feed them back via `.sync_sashes()`:
@@ -118,8 +155,7 @@ Pass a custom function via `.style(...)` to fully control the handle appearance.
 ## Running the examples
 
 ```sh
-cargo run --example sashing             # linked SashH + SashV with sync demo
-cargo run --example sashing_w_outer     # outer handle with proportional resize mode
+cargo run --example sashing   # panel sync, outer handle, cross-size sync
 ```
 
 ## Dependency
