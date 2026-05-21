@@ -54,6 +54,7 @@ impl SashH {
             on_outer_resize: None,
             cross_handle_size: None,
             min_cross_size: 0.0,
+            max_cross_size: None,
             on_cross_resize: None,
             sync_cross_size: None,
         }
@@ -98,6 +99,7 @@ impl SashV {
             on_outer_resize: None,
             cross_handle_size: None,
             min_cross_size: 0.0,
+            max_cross_size: None,
             on_cross_resize: None,
             sync_cross_size: None,
         }
@@ -583,6 +585,7 @@ where
     on_outer_resize: Option<Box<dyn Fn(Id, f32) -> Message + 'a>>,
     cross_handle_size: Option<f32>,
     min_cross_size: f32,
+    max_cross_size: Option<f32>,
     on_cross_resize: Option<Box<dyn Fn(Id, f32) -> Message + 'a>>,
     sync_cross_size: Option<f32>,
 }
@@ -597,6 +600,14 @@ where
 
     /// Maximum total size; panels scale proportionally when exceeded.
     pub fn max_size(mut self, max: f32) -> Self { self.max_size = Some(max); self }
+
+    /// Maximum total size; panels scale proportionally when exceeded.
+    pub fn max_size_maybe(mut self, max: Option<f32>) -> Self {
+        if let Some(v) = max {
+            self.max_size = Some(v);
+        }
+        self
+    }
 
     /// Minimum panel size enforced while dragging. Default: `0.0`.
     pub fn min_size(mut self, min: f32) -> Self { self.min_size = min; self }
@@ -651,6 +662,19 @@ where
     /// Minimum cross size enforced while dragging the cross handle. Default: `0.0`.
     pub fn min_cross_size(mut self, min: f32) -> Self {
         self.min_cross_size = min; self
+    }
+
+    /// Maximum cross size enforced while dragging the cross handle.
+    pub fn max_cross_size(mut self, max: f32) -> Self {
+        self.max_cross_size = Some(max); self
+    }
+
+    /// Maximum cross size enforced while dragging the cross handle.
+    pub fn max_cross_size_maybe(mut self, max: Option<f32>) -> Self {
+        if let Some(v) = max {
+            self.max_cross_size = Some(v);
+        }
+        self
     }
 
     /// Callback fired on every cross-handle drag tick: `(id, new_cross_size)`.
@@ -945,7 +969,9 @@ where
                 } else if st.is_outer_dragging {
                     let id = st.id;
                     let pos = ax.cursor_coord(*position);
-                    let new_total = (pos - ax.bounds_start(bounds)).round().max(0.0);
+                    let new_total = (pos - ax.bounds_start(bounds)).round()
+                        .max(0.0)
+                        .min(self.max_size.unwrap_or(f32::MAX));
                     apply_outer_resize(&mut st.sizes, new_total, self.outer_resize_mode, self.min_size);
                     if let Some(f) = &self.on_outer_resize {
                         let total: f32 = st.sizes.iter().sum();
@@ -959,7 +985,8 @@ where
                     let pos = ax.cross_coord(*position);
                     let new_cross = (st.cross_drag_start_size + pos - st.cross_drag_start_cursor)
                         .round()
-                        .max(self.min_cross_size);
+                        .max(self.min_cross_size)
+                        .min(self.max_cross_size.unwrap_or(f32::MAX));
                     st.cross_size = new_cross;
                     if let Some(f) = &self.on_cross_resize { shell.publish(f(id, new_cross)); }
                     shell.capture_event();

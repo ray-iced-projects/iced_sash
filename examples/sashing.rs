@@ -5,7 +5,7 @@
 
 use iced::Length::Fill;
 use iced::{Color, Element, Length, Theme};
-use iced::widget::{center, checkbox, column, container, radio, row, text};
+use iced::widget::{center, checkbox, column, container, radio, row, text, text_input};
 
 use iced_sash::{Id, OuterResizeMode, SashH, SashV};
 
@@ -28,18 +28,34 @@ struct App {
     sync_cross_sashes: bool,
     cross_is_checked: bool,
     outer_mode: Option<OuterResizeMode>,
+    min_size: f32,
+    max_size: Option<f32>,
+    min_size_text: String,
+    max_size_text: String,
+    min_cross_size: f32,
+    max_cross_size: Option<f32>,
+    min_cross_size_text: String,
+    max_cross_size_text: String,
 }
 
 impl App {
     fn new() -> Self {
         Self {
-            sizes: vec![200.0, 300.0, 200.0],
+            sizes: vec![150.0, 200.0, 150.0],
             sync_sashes: false,
             is_checked: false,
             height: 200.0,
             sync_cross_sashes: false,
             cross_is_checked: false,
             outer_mode: None,
+            min_size: 0.0,
+            max_size: None,
+            min_size_text: String::new(),
+            max_size_text: String::new(),
+            min_cross_size: 0.0,
+            max_cross_size: None,
+            min_cross_size_text: String::new(),
+            max_cross_size_text: String::new(),
         }
     }
 }
@@ -53,6 +69,16 @@ enum Message {
     ResizedCrossH(Id, f32),
     OuterResized(Id, f32),
     OnOuterMode(OuterResizeMode),
+    
+    SetMinText(String),
+    SetMin,
+    SetMaxText(String),
+    SetMax,
+
+    SetCrossMinText(String),
+    SetCrossMin,
+    SetCrossMaxText(String),
+    SetCrossMax,
 }
 
 impl App {
@@ -72,7 +98,7 @@ impl App {
             }
             Message::ResizedH(_id, index, size) => {
                 if self.sync_sashes {
-                    iced_sash::resize(&mut self.sizes, index, size, 50.0);
+                    iced_sash::resize(&mut self.sizes, index, size, self.min_size);
                 }
             }
             Message::ResizedCrossH(_id, size) => {
@@ -95,6 +121,32 @@ impl App {
             }
             Message::OnOuterMode(mode) => {
                 self.outer_mode = Some(mode);
+            }
+            Message::SetMinText(value) => {
+                self.min_size_text = value;
+            }
+            Message::SetMin => {
+                self.min_size = self.min_size_text.parse().unwrap_or(0.0);
+            }
+            Message::SetMaxText(value) => {
+                self.max_size_text = value;
+            }
+            Message::SetMax => {
+                let max = self.max_size_text.parse().unwrap_or(0.0);
+                self.max_size = if max > 0.0 { Some(max) } else { None };
+            }
+            Message::SetCrossMinText(value) => {
+                self.min_cross_size_text = value;
+            }
+            Message::SetCrossMin => {
+                self.min_cross_size = self.min_cross_size_text.parse().unwrap_or(0.0);
+            }
+            Message::SetCrossMaxText(value) => {
+                self.max_cross_size_text = value;
+            }
+            Message::SetCrossMax => {
+                let max = self.max_cross_size_text.parse().unwrap_or(0.0);
+                self.max_cross_size = if max > 0.0 { Some(max) } else { None };
             }
         }
     }
@@ -123,7 +175,10 @@ impl App {
                 self.height,
                 4.0,
             )
-            .min_size(50.0)
+            .min_size(self.min_size)
+            .max_size_maybe(self.max_size)
+            .min_cross_size(self.min_cross_size)
+            .max_cross_size_maybe(self.max_cross_size)
             .on_resize(Message::ResizedH)
             .outer_handle(6.0)
             .outer_resize_mode(self.outer_mode.unwrap_or_default())
@@ -179,17 +234,56 @@ impl App {
 
         let sashes = 
             column(vec![make_sash(), make_sash()])
-            .height(500.0)
+            .height(450.0)
             .spacing(20.0)
             .into();
+        
+        
+        let min_max = row(
+            vec![
+                text("Set min size").into(),
+                text_input("", &self.min_size_text)
+                    .on_input(Message::SetMinText)
+                    .on_submit(Message::SetMin)
+                    .width(100.0)
+                    .into(),
+                text("Set max size").into(),
+                text_input("", &self.max_size_text)
+                    .on_input(Message::SetMaxText)
+                    .on_submit(Message::SetMax)
+                    .width(100.0)
+                    .into(),
+                text("Press Enter to submit").into()
+                ]
+        ).spacing(10.0).into();
+
+        let cross_min_max = row(
+            vec![
+                text("Set cross min size").into(),
+                text_input("", &self.min_cross_size_text)
+                    .on_input(Message::SetCrossMinText)
+                    .on_submit(Message::SetCrossMin)
+                    .width(100.0)
+                    .into(),
+                text("Set cross max size").into(),
+                text_input("", &self.max_cross_size_text)
+                    .on_input(Message::SetCrossMaxText)
+                    .on_submit(Message::SetCrossMax)
+                    .width(100.0)
+                    .into(),
+                text("Press Enter to submit").into()
+                ]
+        ).spacing(10.0).into();
 
         let controls = column(vec![
             sashes,
             chk,
             chk_cross,
             outer_mode_rads,
+            min_max,
+            cross_min_max,
         ])
-        .spacing(20.0)
+        .spacing(10.0)
         .width(750.0)
         .height(Fill)
         .into();
