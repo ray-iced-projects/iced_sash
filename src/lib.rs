@@ -561,6 +561,8 @@ struct SashState {
     cross_hovered: bool,
     cross_drag_start_size: f32,
     cross_drag_start_cursor: f32,
+    limits_max_main: f32,
+    limits_max_cross: f32,
 }
 
 /// A resizable panel widget. Construct with [`SashH`] or [`SashV`].
@@ -711,6 +713,8 @@ where
             cross_hovered: false,
             cross_drag_start_size: self.cross_size,
             cross_drag_start_cursor: 0.0,
+            limits_max_main: f32::INFINITY,
+            limits_max_cross: f32::INFINITY,
         })
     }
 
@@ -730,7 +734,7 @@ where
         &mut self,
         tree: &mut Tree,
         renderer: &iced::Renderer,
-        _limits: &layout::Limits,
+        limits: &layout::Limits,
     ) -> layout::Node {
         if let Some(new) = &self.sync_sizes {
             let st = tree.state.downcast_mut::<SashState>();
@@ -744,13 +748,36 @@ where
                 st.cross_size = new;
             }
         }
+        let ax = self.axis;
+        // Clamp stored sizes to whatever space the parent is offering.
+        {
+            let max = limits.max();
+            let max_main  = match ax { Axis::Horizontal => max.width,  Axis::Vertical => max.height };
+            let max_cross = match ax { Axis::Horizontal => max.height, Axis::Vertical => max.width  };
+            let st = tree.state.downcast_mut::<SashState>();
+            st.limits_max_main = max_main;
+            st.limits_max_cross = max_cross;
+            if max_cross.is_finite() {
+                let avail = (max_cross - self.cross_handle_size.unwrap_or(0.0)).max(0.0);
+                st.cross_size = st.cross_size.min(avail);
+            }
+            if max_main.is_finite() {
+                let avail = (max_main - self.outer_handle_size.unwrap_or(0.0)).max(0.0);
+                let total: f32 = st.sizes.iter().sum();
+                if total > avail && total > 0.0 {
+                    let scale = avail / total;
+                    for s in &mut st.sizes {
+                        *s *= scale;
+                    }
+                }
+            }
+        }
         let (display, cross_size) = {
             let st = tree.state.downcast_ref::<SashState>();
             let s = if st.sizes.is_empty() { &self.initial_sizes } else { &st.sizes };
             (apply_max_size(s, self.max_size), st.cross_size)
         };
 
-        let ax = self.axis;
         let mut child_nodes = Vec::with_capacity(self.children.len());
         let mut main = 0.0_f32;
         for (i, child) in self.children.iter_mut().enumerate() {
@@ -969,9 +996,11 @@ where
                 } else if st.is_outer_dragging {
                     let id = st.id;
                     let pos = ax.cursor_coord(*position);
+                    let container_max = (st.limits_max_main - self.outer_handle_size.unwrap_or(0.0)).max(0.0);
                     let new_total = (pos - ax.bounds_start(bounds)).round()
                         .max(0.0)
-                        .min(self.max_size.unwrap_or(f32::MAX));
+                        .min(self.max_size.unwrap_or(f32::MAX))
+                        .min(container_max);
                     apply_outer_resize(&mut st.sizes, new_total, self.outer_resize_mode, self.min_size);
                     if let Some(f) = &self.on_outer_resize {
                         let total: f32 = st.sizes.iter().sum();
@@ -983,10 +1012,12 @@ where
                 } else if st.is_cross_dragging {
                     let id = st.id;
                     let pos = ax.cross_coord(*position);
+                    let container_max_cross = (st.limits_max_cross - self.cross_handle_size.unwrap_or(0.0)).max(0.0);
                     let new_cross = (st.cross_drag_start_size + pos - st.cross_drag_start_cursor)
                         .round()
                         .max(self.min_cross_size)
-                        .min(self.max_cross_size.unwrap_or(f32::MAX));
+                        .min(self.max_cross_size.unwrap_or(f32::MAX))
+                        .min(container_max_cross);
                     st.cross_size = new_cross;
                     if let Some(f) = &self.on_cross_resize { shell.publish(f(id, new_cross)); }
                     shell.capture_event();
@@ -1082,4 +1113,219 @@ where
 pub type SashHWidget<'a, Message, Theme = iced::Theme> = SashWidget<'a, Message, Theme>;
 pub type SashVWidget<'a, Message, Theme = iced::Theme> = SashWidget<'a, Message, Theme>;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
+        Rectangle { x, y, width: w, height: h }
+    }
+
+    fn approx_eq(a: f32, b: f32) -> bool {
+        (a - b).abs() < 0.001
+    }
+
+    fn sizes_approx_eq(a: &[f32], b: &[f32]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| approx_eq(*x, *y))
+    }
+
+    // ── resize ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn resize_basic_shrink() {
+        let mut s = vec![200.0, 200.0];
+        resize(&mut s, 0, 150.0, 0.0);
+        assert!(approx_eq(s[0], 150.0));
+        assert!(approx_eq(s[1], 250.0)); // neighbour absorbs the 50px
+    }
+
+    #[test]
+    fn resize_basic_grow() {
+        let mut s = vec![100.0, 300.0];
+        resize(&mut s, 0, 200.0, 0.0);
+        assert!(approx_eq(s[0], 200.0));
+        assert!(approx_eq(s[1], 200.0));
+    }
+
+    #[test]
+    fn resize_respects_min_size_on_target() {
+        let mut s = vec![200.0, 200.0];
+        resize(&mut s, 0, 10.0, 50.0); // requested 10, min is 50
+        assert!(s[0] >= 50.0);
+    }
+
+    #[test]
+    fn resize_respects_min_size_on_neighbour() {
+        // Growing panel 0 so much that panel 1 would go below min
+        let mut s = vec![100.0, 100.0];
+        resize(&mut s, 0, 180.0, 50.0); // panel 1 min = 50
+        assert!(s[1] >= 50.0);
+        assert!(s[0] >= 50.0);
+    }
+
+    #[test]
+    fn resize_last_panel_no_neighbour() {
+        let mut s = vec![100.0, 200.0];
+        resize(&mut s, 1, 300.0, 0.0); // last panel, no neighbour
+        assert!(approx_eq(s[1], 300.0));
+        assert!(approx_eq(s[0], 100.0)); // first panel untouched
+    }
+
+    #[test]
+    fn resize_out_of_bounds_index_is_noop() {
+        let mut s = vec![100.0, 200.0];
+        resize(&mut s, 5, 50.0, 0.0);
+        assert!(sizes_approx_eq(&s, &[100.0, 200.0]));
+    }
+
+    #[test]
+    fn resize_total_preserved_when_no_min_clash() {
+        let mut s = vec![150.0, 250.0, 100.0];
+        let total_before: f32 = s.iter().sum();
+        resize(&mut s, 1, 200.0, 0.0);
+        // Only the dragged panel and its right neighbour change; total of those two is preserved.
+        let total_after: f32 = s.iter().sum();
+        assert!(approx_eq(total_before, total_after));
+    }
+
+    // ── apply_outer_resize ───────────────────────────────────────────────────
+
+    #[test]
+    fn outer_resize_last_only_grow() {
+        let mut s = vec![100.0, 100.0];
+        apply_outer_resize(&mut s, 300.0, OuterResizeMode::LastOnly, 0.0);
+        assert!(approx_eq(s[0], 100.0));
+        assert!(approx_eq(s[1], 200.0));
+    }
+
+    #[test]
+    fn outer_resize_last_only_shrink() {
+        let mut s = vec![100.0, 200.0];
+        apply_outer_resize(&mut s, 250.0, OuterResizeMode::LastOnly, 0.0);
+        assert!(approx_eq(s[0], 100.0));
+        assert!(approx_eq(s[1], 150.0));
+    }
+
+    #[test]
+    fn outer_resize_last_only_respects_min() {
+        let mut s = vec![100.0, 100.0];
+        apply_outer_resize(&mut s, 10.0, OuterResizeMode::LastOnly, 50.0); // min=50, so total >= 100
+        assert!(s[1] >= 50.0);
+    }
+
+    #[test]
+    fn outer_resize_uniform_grow() {
+        let mut s = vec![100.0, 100.0];
+        apply_outer_resize(&mut s, 300.0, OuterResizeMode::Uniform, 0.0);
+        assert!(sizes_approx_eq(&s, &[150.0, 150.0]));
+    }
+
+    #[test]
+    fn outer_resize_proportional_grow() {
+        let mut s = vec![100.0, 300.0]; // 25% / 75%
+        apply_outer_resize(&mut s, 800.0, OuterResizeMode::Proportional, 0.0);
+        assert!(approx_eq(s[0], 200.0)); // 25% of 800
+        assert!(approx_eq(s[1], 600.0)); // 75% of 800
+    }
+
+    #[test]
+    fn outer_resize_no_delta_is_noop() {
+        let mut s = vec![100.0, 200.0];
+        apply_outer_resize(&mut s, 300.0, OuterResizeMode::LastOnly, 0.0);
+        assert!(sizes_approx_eq(&s, &[100.0, 200.0]));
+    }
+
+    #[test]
+    fn outer_resize_empty_is_noop() {
+        let mut s: Vec<f32> = vec![];
+        apply_outer_resize(&mut s, 300.0, OuterResizeMode::LastOnly, 0.0);
+        assert!(s.is_empty());
+    }
+
+    // ── apply_max_size ───────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_max_size_scales_down() {
+        let result = apply_max_size(&[200.0, 200.0], Some(200.0)); // total 400, max 200
+        assert!(approx_eq(result[0], 100.0));
+        assert!(approx_eq(result[1], 100.0));
+    }
+
+    #[test]
+    fn apply_max_size_noop_when_under() {
+        let s = vec![50.0, 50.0];
+        let result = apply_max_size(&s, Some(200.0));
+        assert!(sizes_approx_eq(&result, &s));
+    }
+
+    #[test]
+    fn apply_max_size_noop_when_none() {
+        let s = vec![500.0, 500.0];
+        let result = apply_max_size(&s, None);
+        assert!(sizes_approx_eq(&result, &s));
+    }
+
+    #[test]
+    fn apply_max_size_preserves_proportions() {
+        let result = apply_max_size(&[100.0, 300.0], Some(200.0)); // total 400, max 200
+        // 100/400 * 200 = 50, 300/400 * 200 = 150
+        assert!(approx_eq(result[0], 50.0));
+        assert!(approx_eq(result[1], 150.0));
+    }
+
+    // ── max_size_scale ───────────────────────────────────────────────────────
+
+    #[test]
+    fn max_size_scale_over_limit() {
+        let scale = max_size_scale(&[300.0, 300.0], Some(300.0)); // total 600, max 300
+        assert!(approx_eq(scale, 2.0));
+    }
+
+    #[test]
+    fn max_size_scale_at_or_under_limit() {
+        assert!(approx_eq(max_size_scale(&[100.0, 100.0], Some(300.0)), 1.0));
+        assert!(approx_eq(max_size_scale(&[100.0, 200.0], None), 1.0));
+    }
+
+    // ── get_handle_bounds ────────────────────────────────────────────────────
+
+    #[test]
+    fn handle_bounds_horizontal_positions() {
+        let bounds = rect(0.0, 0.0, 500.0, 100.0);
+        let panels = [150.0, 200.0, 150.0];
+        let offsets = [-2.0, -2.0]; // two inner handles
+        let hbs = get_handle_bounds(bounds, &panels, 4.0, 100.0, &offsets, false, Direction::Horizontal);
+        assert_eq!(hbs.len(), 2);
+        // first handle centred at x=150
+        assert!(approx_eq(hbs[0].x, 148.0));
+        // second handle centred at x=350
+        assert!(approx_eq(hbs[1].x, 348.0));
+    }
+
+    #[test]
+    fn handle_bounds_vertical_positions() {
+        let bounds = rect(0.0, 0.0, 100.0, 400.0);
+        let panels = [100.0, 100.0, 100.0];
+        let offsets = [-2.0, -2.0];
+        let hbs = get_handle_bounds(bounds, &panels, 100.0, 4.0, &offsets, false, Direction::Vertical);
+        assert_eq!(hbs.len(), 2);
+        assert!(approx_eq(hbs[0].y, 98.0));
+        assert!(approx_eq(hbs[1].y, 198.0));
+    }
+
+    // ── get_width_height_bounds ──────────────────────────────────────────────
+
+    #[test]
+    fn width_height_bounds_count_and_positions() {
+        let bounds = rect(10.0, 5.0, 400.0, 100.0);
+        let panels = [100.0, 150.0, 100.0];
+        let wbs = get_width_height_bounds(bounds, &panels, 4.0, 100.0, Direction::Horizontal);
+        assert_eq!(wbs.len(), 3);
+        assert!(approx_eq(wbs[0].x, 10.0));
+        assert!(approx_eq(wbs[1].x, 110.0));
+        assert!(approx_eq(wbs[2].x, 260.0));
+    }
+}
 
