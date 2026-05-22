@@ -2,10 +2,11 @@
 
 A resizable panel widget for [iced](https://github.com/iced-rs/iced) that lets adjacent containers be dragged to resize.
 
-Panels sizes are managed internally via iced tree state — no app-side size storage is required unless you want to link multiple sashes together.
+Panels sizes are managed internally via iced tree state — no app-side size storage is required unless you want to link multiple sashes together.  The table is one of the examples.  Easy to make.
 
 <div align="center">
   <img src="./assets/iced_sash.gif" alt="demo" width="250">
+  <img src="./assets/table.gif" alt="demo" width="250">
 </div>
 
 ## Widgets
