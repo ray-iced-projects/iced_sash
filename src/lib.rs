@@ -57,6 +57,7 @@ impl SashH {
             max_cross_size: None,
             on_cross_resize: None,
             sync_cross_size: None,
+            clip: false,
         }
     }
 }
@@ -102,6 +103,7 @@ impl SashV {
             max_cross_size: None,
             on_cross_resize: None,
             sync_cross_size: None,
+            clip: false,
         }
     }
 }
@@ -590,6 +592,7 @@ where
     max_cross_size: Option<f32>,
     on_cross_resize: Option<Box<dyn Fn(Id, f32) -> Message + 'a>>,
     sync_cross_size: Option<f32>,
+    clip: bool,
 }
 
 impl<'a, Message, Theme> SashWidget<'a, Message, Theme>
@@ -688,6 +691,12 @@ where
     /// Use this to synchronise cross sizes across sashes from `on_cross_resize` callbacks.
     pub fn sync_cross_sashes(mut self, size: f32) -> Self {
         self.sync_cross_size = Some(size); self
+    }
+
+    /// Sets whether the contents of each panel should be clipped to its bounds.
+    /// Prevents child content from overrunning adjacent panels when resized. Default: `false`.
+    pub fn clip(mut self, clip: bool) -> Self {
+        self.clip = clip; self
     }
 }
 
@@ -810,7 +819,14 @@ where
             .zip(layout.children())
             .zip(tree.children.iter())
         {
-            child.as_widget().draw(child_tree, renderer, theme, style, child_layout, cursor, viewport);
+            if self.clip {
+                let child_bounds = child_layout.bounds();
+                if let Some(clipped_viewport) = child_bounds.intersection(viewport) {
+                    child.as_widget().draw(child_tree, renderer, theme, style, child_layout, cursor, &clipped_viewport);
+                }
+            } else {
+                child.as_widget().draw(child_tree, renderer, theme, style, child_layout, cursor, viewport);
+            }
         }
 
         let ax = self.axis;

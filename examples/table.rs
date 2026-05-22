@@ -81,6 +81,7 @@ fn table_header<'a>(header: &[String], sizes: Vec<f32>, height: f32) -> Element<
     .on_resize(|_id, idx, val| Message::Resize(idx, val))
     .sync_sashes(sizes.clone())
     .style(|theme, status| iced_sash::subtle(theme, status))
+    .clip(true)
     .into();
 
     container(column![sash, container(rule::horizontal(6)).width(Length::Fixed(sizes.iter().sum()))])
@@ -103,6 +104,7 @@ fn table_body<'a>(body: &[Vec<String>], sizes: Vec<f32>, height: f32) -> Element
             .on_resize(|_id, idx, val| Message::Resize(idx, val))
             .sync_sashes(sizes.clone())
             .style(|theme, status| iced_sash::subtle(theme, status))
+            .clip(true)
             .into();
 
             if i % 2 == 1 {
