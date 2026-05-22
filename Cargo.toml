@@ -10,3 +10,4 @@ name = "iced_sash"
 
 [dependencies]
 iced = { git = "https://github.com/iced-rs/iced", branch = "master", features = ["advanced", "debug"] }
+csv = "1"
