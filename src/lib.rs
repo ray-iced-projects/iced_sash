@@ -11,7 +11,7 @@ use iced::{
     self, Color, Length, 
     Rectangle, Size, Theme,
 };
-use iced::advanced::{mouse, Layout, Shell, Widget};
+use iced::advanced::{mouse, overlay, Layout, Shell, Widget};
 use iced::advanced::Renderer as AdvancedRenderer;
 use iced::Point;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1119,6 +1119,17 @@ where
             .map(|((c, l), t)| c.as_widget().mouse_interaction(t, l, cursor, viewport, renderer))
             .max()
             .unwrap_or_default()
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: iced::Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
+        overlay::from_children(&mut self.children, tree, layout, renderer, viewport, translation)
     }
 }
 
