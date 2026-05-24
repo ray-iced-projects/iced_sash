@@ -165,6 +165,7 @@ fn get_width_height_bounds(
     widths_heights: &[f32],
     handle_width: f32,
     handle_height: f32,
+    gap: f32,
     direction: Direction,
     ) -> Vec<Rectangle> 
 {
@@ -173,7 +174,7 @@ fn get_width_height_bounds(
             Direction::Horizontal => bounds.x,
             Direction::Vertical => bounds.y,
         };
-        for width_height in widths_heights.iter() {
+        for (i, width_height) in widths_heights.iter().enumerate() {
             let rect = match direction {
                 Direction::Horizontal => {
                     Rectangle{ 
@@ -194,16 +195,10 @@ fn get_width_height_bounds(
             };
                 
             w_h_bounds.push(rect);
-
-            match direction {
-                Direction::Horizontal => {
-                    start += width_height;
-                },
-                Direction::Vertical => {
-                    start += width_height;
-                },
+            start += width_height;
+            if i + 1 < widths_heights.len() {
+                start += gap;
             }
-            
         }
         w_h_bounds
 }
@@ -771,7 +766,8 @@ where
                 st.cross_size = st.cross_size.min(avail);
             }
             if max_main.is_finite() {
-                let avail = (max_main - self.outer_handle_size.unwrap_or(0.0)).max(0.0);
+                let n_sashes = st.sizes.len().saturating_sub(1);
+                let avail = (max_main - self.outer_handle_size.unwrap_or(0.0) - n_sashes as f32 * self.sash_size).max(0.0);
                 let total: f32 = st.sizes.iter().sum();
                 if total > avail && total > 0.0 {
                     let scale = avail / total;
@@ -789,6 +785,7 @@ where
 
         let mut child_nodes = Vec::with_capacity(self.children.len());
         let mut main = 0.0_f32;
+        let n_panels = self.children.len();
         for (i, child) in self.children.iter_mut().enumerate() {
             let panel_size = display.get(i).copied().unwrap_or(0.0);
             let lim = layout::Limits::new(Size::ZERO, ax.child_limit(panel_size, cross_size));
@@ -798,6 +795,9 @@ where
                 .move_to(ax.child_offset(main));
             child_nodes.push(node);
             main += panel_size;
+            if i + 1 < n_panels {
+                main += self.sash_size;
+            }
         }
         let total_main = main + self.outer_handle_size.unwrap_or(0.0);
         let total_cross = cross_size + self.cross_handle_size.unwrap_or(0.0);
@@ -834,8 +834,7 @@ where
         let display = apply_max_size(&st.sizes, self.max_size);
         let cross_size = st.cross_size;
         let bounds = layout.bounds();
-        let mut offsets = vec![-self.sash_size / 2.0; display.len().saturating_sub(1)];
-        offsets.push(-self.sash_size);
+        let offsets: Vec<f32> = (0..display.len()).map(|i| i as f32 * self.sash_size).collect();
         let (hw, hh) = ax.handle_dims(self.sash_size, cross_size);
         let hbs = get_handle_bounds(bounds, &display, hw, hh, &offsets, false, ax.direction());
         let hover = st.hovered;
@@ -855,7 +854,8 @@ where
         }
 
         if let Some(ohs) = self.outer_handle_size {
-            let panel_total: f32 = display.iter().sum();
+            let n_sashes = display.len().saturating_sub(1);
+            let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
             let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, cross_size);
             let outer_status = if st.is_outer_dragging { Status::Dragged }
                 else if st.outer_hovered { Status::Hovered }
@@ -872,7 +872,8 @@ where
         }
 
         if let Some(chs) = self.cross_handle_size {
-            let panel_total: f32 = display.iter().sum();
+            let n_sashes = display.len().saturating_sub(1);
+            let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
             let total_main = panel_total + self.outer_handle_size.unwrap_or(0.0);
             let cross_rect = ax.cross_handle_rect(bounds, cross_size, chs, total_main);
             let cross_status = if st.is_cross_dragging { Status::Dragged }
@@ -917,11 +918,10 @@ where
         let display = apply_max_size(&st.sizes, self.max_size);
         let scale = max_size_scale(&st.sizes, self.max_size);
         let end = ax.bounds_end(bounds);
-        let mut offsets = vec![-self.sash_size / 2.0; display.len().saturating_sub(1)];
-        offsets.push(-self.sash_size);
+        let offsets: Vec<f32> = (0..display.len()).map(|i| i as f32 * self.sash_size).collect();
         let (hw, hh) = ax.handle_dims(self.sash_size, cross_size);
         let hbs = get_handle_bounds(bounds, &display, hw, hh, &offsets, false, ax.direction());
-        let pbs = get_width_height_bounds(bounds, &display, hw, hh, ax.direction());
+        let pbs = get_width_height_bounds(bounds, &display, hw, hh, self.sash_size, ax.direction());
 
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -931,7 +931,8 @@ where
                     st.drag_index = idx;
                     shell.capture_event();
                 } else if let Some(ohs) = self.outer_handle_size {
-                    let panel_total: f32 = display.iter().sum();
+                    let n_sashes = display.len().saturating_sub(1);
+                    let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
                     let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, cross_size);
                     if cursor.is_over(outer_rect) {
                         st.is_outer_dragging = true;
@@ -947,7 +948,8 @@ where
                         }
                     }
                 } else if let Some(chs) = self.cross_handle_size {
-                    let panel_total: f32 = display.iter().sum();
+                    let n_sashes = display.len().saturating_sub(1);
+                    let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
                     let total_main = panel_total;
                     let cross_rect = ax.cross_handle_rect(bounds, cross_size, chs, total_main);
                     if cursor.is_over(cross_rect) {
@@ -993,14 +995,15 @@ where
                     let pos = ax.cursor_coord(*position);
                     let pb_start = ax.main_start(pb);
                     let hb_main = ax.handle_main_size(hb);
+                    let ohs = self.outer_handle_size.unwrap_or(0.0);
                     let v = if pos < pb_start && idx == 0 {
                         0.0_f32
                     } else if idx > 0 && pos < ax.main_start(hbs[idx - 1]) {
                         0.0_f32
                     } else if idx < hc - 1 && pos > ax.main_start(hbs[idx + 1]) {
-                        (ax.main_start(hbs[idx + 1]) - pb_start).round()
-                    } else if hc < pc && pos > end - hb_main / 2.0 {
-                        (end - hb_main / 2.0 - pb_start).round()
+                        (ax.main_start(hbs[idx + 1]) - hb_main - pb_start).round()
+                    } else if hc < pc && pos > end - ohs - hb_main {
+                        (end - ohs - hb_main - pb_start).round()
                     } else {
                         (pos - pb_start).round()
                     };
@@ -1012,8 +1015,10 @@ where
                 } else if st.is_outer_dragging {
                     let id = st.id;
                     let pos = ax.cursor_coord(*position);
-                    let container_max = (st.limits_max_main - self.outer_handle_size.unwrap_or(0.0)).max(0.0);
-                    let new_total = (pos - ax.bounds_start(bounds)).round()
+                    let n_sashes = st.sizes.len().saturating_sub(1);
+                    let sash_total = n_sashes as f32 * self.sash_size;
+                    let container_max = (st.limits_max_main - self.outer_handle_size.unwrap_or(0.0) - sash_total).max(0.0);
+                    let new_total = (pos - ax.bounds_start(bounds) - sash_total).round()
                         .max(0.0)
                         .min(self.max_size.unwrap_or(f32::MAX))
                         .min(container_max);
@@ -1046,7 +1051,8 @@ where
                         shell.request_redraw();
                     }
                     if let Some(ohs) = self.outer_handle_size {
-                        let panel_total: f32 = display.iter().sum();
+                        let n_sashes = display.len().saturating_sub(1);
+                        let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
                         let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, cross_size);
                         let new_outer_hovered = cursor.is_over(outer_rect);
                         if new_outer_hovered != st.outer_hovered {
@@ -1055,7 +1061,8 @@ where
                         }
                     }
                     if let Some(chs) = self.cross_handle_size {
-                        let panel_total: f32 = display.iter().sum();
+                        let n_sashes = display.len().saturating_sub(1);
+                        let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
                         let total_main = panel_total + self.outer_handle_size.unwrap_or(0.0);
                         let cross_rect = ax.cross_handle_rect(bounds, cross_size, chs, total_main);
                         let new_cross_hovered = cursor.is_over(cross_rect);
@@ -1085,22 +1092,23 @@ where
         let display = apply_max_size(&st.sizes, self.max_size);
         let cross_size = st.cross_size;
         let bounds = layout.bounds();
-        let mut offsets = vec![-self.sash_size / 2.0; display.len().saturating_sub(1)];
-        offsets.push(-self.sash_size);
+        let offsets: Vec<f32> = (0..display.len()).map(|i| i as f32 * self.sash_size).collect();
         let (hw, hh) = ax.handle_dims(self.sash_size, cross_size);
         let hbs = get_handle_bounds(bounds, &display, hw, hh, &offsets, false, ax.direction());
         if find_mouse_over_handle_bounds(&hbs, cursor).is_some() {
             return ax.resize_interaction();
         }
         if let Some(ohs) = self.outer_handle_size {
-            let panel_total: f32 = display.iter().sum();
+            let n_sashes = display.len().saturating_sub(1);
+            let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
             let outer_rect = ax.outer_handle_rect(bounds, panel_total, ohs, cross_size);
             if cursor.is_over(outer_rect) {
                 return ax.resize_interaction();
             }
         }
         if let Some(chs) = self.cross_handle_size {
-            let panel_total: f32 = display.iter().sum();
+            let n_sashes = display.len().saturating_sub(1);
+            let panel_total: f32 = display.iter().sum::<f32>() + n_sashes as f32 * self.sash_size;
             let total_main = panel_total + self.outer_handle_size.unwrap_or(0.0);
             let cross_rect = ax.cross_handle_rect(bounds, cross_size, chs, total_main);
             if cursor.is_over(cross_rect) {
@@ -1311,24 +1319,28 @@ mod tests {
     fn handle_bounds_horizontal_positions() {
         let bounds = rect(0.0, 0.0, 500.0, 100.0);
         let panels = [150.0, 200.0, 150.0];
-        let offsets = [-2.0, -2.0]; // two inner handles
+        // New model: offsets = [i * sash_size] — handle starts flush at panel right edge.
+        let offsets = [0.0, 4.0]; // two inner handles, sash_size = 4
         let hbs = get_handle_bounds(bounds, &panels, 4.0, 100.0, &offsets, false, Direction::Horizontal);
         assert_eq!(hbs.len(), 2);
-        // first handle centred at x=150
-        assert!(approx_eq(hbs[0].x, 148.0));
-        // second handle centred at x=350
-        assert!(approx_eq(hbs[1].x, 348.0));
+        // first handle starts at x=150 (right edge of panel 0)
+        assert!(approx_eq(hbs[0].x, 150.0));
+        // second handle starts at x=354 (right edge of panel 1 + one sash gap)
+        assert!(approx_eq(hbs[1].x, 354.0));
     }
 
     #[test]
     fn handle_bounds_vertical_positions() {
         let bounds = rect(0.0, 0.0, 100.0, 400.0);
         let panels = [100.0, 100.0, 100.0];
-        let offsets = [-2.0, -2.0];
+        // New model: offsets = [i * sash_size] — handle starts flush at panel bottom edge.
+        let offsets = [0.0, 4.0]; // sash_size = 4
         let hbs = get_handle_bounds(bounds, &panels, 100.0, 4.0, &offsets, false, Direction::Vertical);
         assert_eq!(hbs.len(), 2);
-        assert!(approx_eq(hbs[0].y, 98.0));
-        assert!(approx_eq(hbs[1].y, 198.0));
+        // first handle at y=100 (bottom of panel 0)
+        assert!(approx_eq(hbs[0].y, 100.0));
+        // second handle at y=204 (bottom of panel 1 + one sash gap)
+        assert!(approx_eq(hbs[1].y, 204.0));
     }
 
     // ── get_width_height_bounds ──────────────────────────────────────────────
@@ -1337,11 +1349,12 @@ mod tests {
     fn width_height_bounds_count_and_positions() {
         let bounds = rect(10.0, 5.0, 400.0, 100.0);
         let panels = [100.0, 150.0, 100.0];
-        let wbs = get_width_height_bounds(bounds, &panels, 4.0, 100.0, Direction::Horizontal);
+        // gap = 4.0 (sash_size); each panel origin is offset by gap after every preceding panel.
+        let wbs = get_width_height_bounds(bounds, &panels, 4.0, 100.0, 4.0, Direction::Horizontal);
         assert_eq!(wbs.len(), 3);
-        assert!(approx_eq(wbs[0].x, 10.0));
-        assert!(approx_eq(wbs[1].x, 110.0));
-        assert!(approx_eq(wbs[2].x, 260.0));
+        assert!(approx_eq(wbs[0].x, 10.0));          // bounds.x
+        assert!(approx_eq(wbs[1].x, 114.0));         // 10 + 100 + 4
+        assert!(approx_eq(wbs[2].x, 268.0));         // 10 + 100 + 4 + 150 + 4
     }
 }
 
